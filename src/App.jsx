@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import cardsData from "./data/genesys_merged.json";
+import cardsData from "./data/cards.json";
 import zeroCardsData from "./data/staplesZero.json";
 import "./App.css";
 import ChangelogPopup from "./ChangelogPopup";
@@ -15,21 +15,6 @@ const typeOrder = [
   "spell",
   "trap",
 ];
-
-// normalize possible frameType strings into one of the typeOrder values
-function normalizeType(frameType) {
-  if (!frameType) return "unknown";
-  const t = String(frameType).toLowerCase();
-  if (t.includes("effect")) return "effect";
-  if (t.includes("ritual")) return "ritual";
-  if (t.includes("fusion")) return "fusion";
-  if (t.includes("synchro")) return "synchro";
-  if (t.includes("xyz")) return "xyz";
-  if (t.includes("spell")) return "spell";
-  if (t.includes("trap")) return "trap";
-  // fallback (put unknown types after the known order)
-  return "unknown";
-}
 
 // parse points filter: returns {min, max} or null
 function parsePointsFilter(input) {
@@ -63,79 +48,67 @@ function App() {
   const [pointsFilter, setPointsFilter] = useState("");
 
   // Normal cards (points > 0)
-  const ogCards = cardsData.data
-    .map(card => ({
-      ...card,
-      // flatten genesys_points so the rest of your code works the same
-      genesys_points: card.misc_info?.[0]?.genesys_points ?? 0,
-    }))
-    const _cards = useMemo(() => ogCards.filter(card => card.genesys_points > 0), [ogCards]) 
+  const _cards = useMemo(() => cardsData.filter(card => card.points > 0), [cardsData])
 
-    const specialNames = zeroCardsData.map(c => c.name);
-    
-    const zeroCards = useMemo(
-      () =>
-        ogCards
-          .filter(c => c.genesys_points <= 0)
-          .filter(c => specialNames.includes(c.name)),
-      [ogCards, specialNames]
-    );
+  const zeroCards = useMemo(
+    () =>
+      cardsData
+      .filter(c => c.points == 0)
+      .filter(c => zeroCardsData.includes(c.name)),
+    [cardsData, zeroCardsData]
+  );
 
   useEffect(() => {
 
-    
+    // 1️⃣ Determine which array to start with
+    const displayedCards = showSpecial ? zeroCards : _cards;
+    let filtered = [...displayedCards];
 
-  // 1️⃣ Determine which array to start with
-  const displayedCards = showSpecial ? zeroCards : _cards;
-  let filtered = [...displayedCards];
+    // 2️⃣ Update archetypes dropdown based on displayedCards
+    setArchetypes(
+      Array.from(new Set(displayedCards.map((c) => c.archetype).filter(Boolean))).sort()
+    );
 
-  // 2️⃣ Update archetypes dropdown based on displayedCards
-  setArchetypes(
-    Array.from(new Set(displayedCards.map((c) => c.archetype).filter(Boolean))).sort()
-  );
+    // 3️⃣ Apply archetype filter
+    if (selectedArchetype) {
+      filtered = filtered.filter((c) => c.archetype === selectedArchetype);
+    }
 
-  // 3️⃣ Apply archetype filter
-  if (selectedArchetype) {
-    filtered = filtered.filter((c) => c.archetype === selectedArchetype);
-  }
+    // 4️⃣ Apply type filter
+    if (selectedType && selectedType !== "all") {
+      filtered = filtered.filter((c) => c.type === selectedType);
+    }
 
-  // 4️⃣ Apply type filter
-  if (selectedType && selectedType !== "all") {
-    filtered = filtered.filter((c) => normalizeType(c.frameType) === selectedType);
-  }
+    // 5️⃣ Apply search filter
+    if (search.trim() !== "") {
+      const s = search.toLowerCase();
+      filtered = filtered.filter((c) => c.name.toLowerCase().includes(s));
+    }
 
-  // 5️⃣ Apply search filter
-  if (search.trim() !== "") {
-    const s = search.toLowerCase();
-    filtered = filtered.filter((c) => (c.name || "").toLowerCase().includes(s));
-  }
+    // 6️⃣ Apply points filter
+    const range = parsePointsFilter(pointsFilter);
+    if (range) {
+      filtered = filtered.filter((c) => {
+        const p = Number(c.points);
+        return Number.isFinite(p) && p >= range.min && p <= range.max;
+      });
+    }
 
-  // 6️⃣ Apply points filter
-  const range = parsePointsFilter(pointsFilter);
-  if (range) {
-    filtered = filtered.filter((c) => {
-      const p = Number(c.genesys_points);
-      return Number.isFinite(p) && p >= range.min && p <= range.max;
+    // 7️⃣ Sort
+    const sorted = filtered.sort((a, b) => {
+      const pa = Number(a.points) || 0;
+      const pb = Number(b.points) || 0;
+      if (pa !== pb) return sortDesc ? pb - pa : pa - pb;
+
+      let ia = typeOrder.indexOf(a.type);
+      let ib = typeOrder.indexOf(b.type);
+      if (ia === -1) ia = typeOrder.length;
+      if (ib === -1) ib = typeOrder.length;
+      return ia - ib;
     });
-  }
 
-  // 7️⃣ Sort
-  const sorted = filtered.sort((a, b) => {
-    const pa = Number(a.genesys_points) || 0;
-    const pb = Number(b.genesys_points) || 0;
-    if (pa !== pb) return sortDesc ? pb - pa : pa - pb;
-
-    const na = normalizeType(a.frameType);
-    const nb = normalizeType(b.frameType);
-    let ia = typeOrder.indexOf(na);
-    let ib = typeOrder.indexOf(nb);
-    if (ia === -1) ia = typeOrder.length;
-    if (ib === -1) ib = typeOrder.length;
-    return ia - ib;
-  });
-
-  setCards(sorted);
-}, [_cards, zeroCards, sortDesc, selectedType, selectedArchetype, search, pointsFilter, showSpecial]);
+    setCards(sorted);
+  }, [_cards, zeroCards, sortDesc, selectedType, selectedArchetype, search, pointsFilter, showSpecial]);
 
   const toggleSort = () => setSortDesc((s) => !s);
 
@@ -163,26 +136,26 @@ function App() {
   return (
     <div className="container">
       <div className="controls" style={{ position: "relative" }}>
-      <button onClick={() => setShowSpecial((prev) => !prev)}>
-        {showSpecial ? "Show 0+ Points Cards" : "Show 0 Points Staples"}
-      </button>
-    </div>
+        <button onClick={() => setShowSpecial((prev) => !prev)}>
+          {showSpecial ? "Show 0+ Points Cards" : "Show 0 Points Staples"}
+        </button>
+      </div>
       <h1>Yu-Gi-Oh! Genesys Format Helper</h1>
-      <h4> Genesys Points Update: 24 Sept, 2025</h4>
+      <h4>Genesys Points Update: 27 Oct, 2025</h4>
       <a
-      href="https://x.com/TheHelixCore"
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
-    >
-      <img
-        src="https://abs.twimg.com/favicons/twitter.2.ico"
-        alt="Twitter"
-        style={{ width: "20px", height: "20px" }}
-      />
-      Follow me on Twitter
-    </a>
-      <h5> New features coming soon...</h5>
+        href="https://x.com/TheHelixCore"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+      >
+        <img
+          src="https://abs.twimg.com/favicons/twitter.2.ico"
+          alt="Twitter"
+          style={{ width: "20px", height: "20px" }}
+        />
+        Follow me on Twitter
+      </a>
+      <h5>New features coming soon...</h5>
       <div className="controls">
         {/* Search */}
         <input
@@ -202,19 +175,19 @@ function App() {
           style={{ padding: "8px", marginRight: "10px", borderRadius: "6px" }}
         />
 
-         {/* Archetype dropdown */}
-          <select
-            value={selectedArchetype}
-            onChange={(e) => setSelectedArchetype(e.target.value)}
-            style={{ padding: "8px", marginRight: "10px", borderRadius: "6px" , width: '125px'}}
-          >
-            <option value="">All Archetypes</option>
-            {archetypes.map((arch) => (
-              <option key={arch} value={arch}>
-                {arch}
-              </option>
-            ))}
-          </select>
+        {/* Archetype dropdown */}
+        <select
+          value={selectedArchetype}
+          onChange={(e) => setSelectedArchetype(e.target.value)}
+          style={{ padding: "8px", marginRight: "10px", borderRadius: "6px" , width: '125px'}}
+        >
+          <option value="">All Archetypes</option>
+          {archetypes.map((arch) => (
+            <option key={arch} value={arch}>
+              {arch}
+            </option>
+          ))}
+        </select>
 
         {/* Type selector - options come from typeOrder (normalized values) */}
         <select
@@ -241,10 +214,7 @@ function App() {
           const CardContent = (
             <>
               <img
-                src={
-                  card.card_images?.[0]?.image_url ||
-                  "https://via.placeholder.com/150x210?text=No+Image"
-                }
+                src={card.image}
                 alt={card.name}
               />
               <p
@@ -259,14 +229,14 @@ function App() {
               >
                 {card.name}
               </p>
-              <p className="points">{card.misc_info[0].genesys_points} pts</p>
+              <p className="points">{card.points} pts</p>
             </>
           );
 
-          return card.ygoprodeck_url ? (
+          return (
             <a
-              key={card.id || card.name}
-              href={card.ygoprodeck_url}
+              key={card.id}
+              href={card.url}
               target="_blank"
               rel="noopener noreferrer"
               className="card"
@@ -274,10 +244,6 @@ function App() {
             >
               {CardContent}
             </a>
-          ) : (
-            <div key={card.id || card.name} className="card">
-              {CardContent}
-            </div>
           );
         })}
       </div>
